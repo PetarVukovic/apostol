@@ -1,4 +1,5 @@
 # models.py
+
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
 from database import Base
@@ -8,14 +9,14 @@ class Agent(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     prompt = Column(String)
-    files = relationship("File", back_populates="agent")
-    messages = relationship("Message", back_populates="agent")
+    files = relationship("File", back_populates="agent", cascade="all, delete-orphan")
+    messages = relationship("Message", back_populates="agent", cascade="all, delete-orphan")
 
 class File(Base):
     __tablename__ = 'files'
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
-    path = Column(String)  # Add this line
+    path = Column(String)
     agent_id = Column(Integer, ForeignKey('agents.id'))
     agent = relationship("Agent", back_populates="files")
 

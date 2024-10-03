@@ -1,24 +1,32 @@
+# main.py
+
 from fastapi import FastAPI, Form, UploadFile, File, Depends, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from chat_engine import Chatbot
+from document_loader import DocumentLoader
+from vdb import VectorStore
 from database import SessionLocal, engine, Base
 import models, schemas
 from typing import List, Optional
 import os
+from dotenv import load_dotenv
+import nest_asyncio
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+load_dotenv()
+nest_asyncio.apply()
 
 # Allow CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace "*" with your frontend URL in production
+    allow_origins=["*"],  # Zamijenite "*" s URL-om vašeg frontenda u produkciji
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    
 )
 
 # Dependency to get DB session
@@ -56,6 +64,16 @@ async def create_agent(
             )
             db.add(file_record)
             db.commit()
+
+            # Obradi PDF i pohrani u Qdrant
+            llamaparse_api_key = os.getenv("LLAMA_CLOUD_API_KEY")
+            document_loader = DocumentLoader(api_key=llamaparse_api_key, result_type="markdown")
+            documents = document_loader.load_documents([file_location])
+
+            vector_store = VectorStore(collection_name=f"agent_{agent.id}")
+            vector_store.index_from_documents(documents)
+            # Nema potrebe za kreiranjem Chatbot instance ovdje
+
     return agent
 
 # Update an existing agent
@@ -85,6 +103,16 @@ async def update_agent(
             )
             db.add(file_record)
             db.commit()
+
+            # Obradi PDF i pohrani u Qdrant
+            llamaparse_api_key = os.getenv("LLAMA_CLOUD_API_KEY")
+            document_loader = DocumentLoader(api_key=llamaparse_api_key, result_type="markdown")
+            documents = document_loader.load_documents([file_location])
+
+            vector_store = VectorStore(collection_name=f"agent_{agent.id}")
+            vector_store.index_from_documents(documents)
+            # Nema potrebe za kreiranjem Chatbot instance ovdje
+
     return agent
 
 # Delete an agent
@@ -115,21 +143,28 @@ def get_agents(db: Session = Depends(get_db)):
     return agents
 
 # Get conversation history
-@app.get("/api/agents/{agent_id}/messages", response_model=List[schemas.Message])
+@app.get("/api/agents/{agent_id}/messages", response_model=List[schemas.MessageBase])
 def get_messages(agent_id: int, db: Session = Depends(get_db)):
     messages = (
         db.query(models.Message)
         .filter(models.Message.agent_id == agent_id)
+        .order_by(models.Message.id)
         .all()
     )
     return messages
 
 # Send a message to an agent
-@app.post("/api/agents/{agent_id}/messages", response_model=schemas.Message)
-def send_message(
-    agent_id: int, message: schemas.MessageCreate, db: Session = Depends(get_db)
+@app.post("/api/agents/{agent_id}/messages", response_model=schemas.MessageBase)
+async def send_message(
+    agent_id: int,
+    message: schemas.MessageCreate,
+    db: Session = Depends(get_db)
 ):
-    # Save user message
+    agent = db.query(models.Agent).filter(models.Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Spremi korisničku poruku
     user_message = models.Message(
         sender='user', text=message.text, agent_id=agent_id
     )
@@ -137,10 +172,38 @@ def send_message(
     db.commit()
     db.refresh(user_message)
 
-    # Generate dummy bot response
-    bot_response = f"Echo: {message.text}"
+    # Dohvati prethodne poruke
+    previous_messages = (
+        db.query(models.Message)
+        .filter(models.Message.agent_id == agent_id)
+        .order_by(models.Message.id)
+        .all()
+    )
+        # Dohvati datoteke povezane s agentom
+    files = db.query(models.File).filter(models.File.agent_id == agent_id).all()
+    if not files:
+        raise HTTPException(status_code=404, detail="No files found for this agent")
+
+    # Pripremi popis putanja do datoteka
+    file_paths = [file.path for file in files]
+
+    # Inicijaliziraj DocumentLoader i učitaj dokumente
+    llamaparse_api_key = os.getenv("LLAMA_CLOUD_API_KEY")
+    document_loader = DocumentLoader(api_key=llamaparse_api_key, result_type="markdown")
+    documents = document_loader.load_documents(file_paths)
+
+    # Postavi chatbota s odgovarajućom kolekcijom iz Qdranta i prethodnim porukama
+    vector_store = VectorStore(collection_name=f"agent_{agent_id}")
+    index=vector_store.index_from_documents(documents=documents)
+    chatbot = Chatbot(vector_store=index)
+    chat_engine = chatbot.setup_chat_engine(previous_messages)
+
+    # Generiraj odgovor
+    bot_response_text = chatbot.get_response(chat_engine, message.text)
+
+    # Spremi botov odgovor
     bot_message = models.Message(
-        sender='bot', text=bot_response, agent_id=agent_id
+        sender='bot', text=bot_response_text, agent_id=agent_id
     )
     db.add(bot_message)
     db.commit()

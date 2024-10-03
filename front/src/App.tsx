@@ -160,22 +160,12 @@ function App() {
   const handleSendMessage = async () => {
     if (currentMessage.trim() && selectedAgent) {
       const userMessage: Message = { sender: 'user', text: currentMessage };
-      const updatedAgent = {
-        ...selectedAgent,
-        chatHistory: [...(selectedAgent.chatHistory || []), userMessage],
-      };
-      setSelectedAgent(updatedAgent);
-      setAgents((prevAgents) =>
-        prevAgents.map((agent) =>
-          agent.id === updatedAgent.id ? updatedAgent : agent
-        )
-      );
-
       setCurrentMessage('');
       setIsStreaming(true);
       setIsSendingMessage(true);
-      // Send message to backend and get response
+  
       try {
+        // Pošaljite poruku backendu i dobijte odgovor
         const response = await axios.post(
           `/api/agents/${selectedAgent.id}/messages`,
           { text: userMessage.text }
@@ -184,14 +174,32 @@ function App() {
           sender: 'bot',
           text: response.data.text,
         };
-        const updatedAgentWithBot = {
-          ...updatedAgent,
-          chatHistory: [...updatedAgent.chatHistory, botMessage],
-        };
-        setSelectedAgent(updatedAgentWithBot);
+  
+        // Ažurirajte `selectedAgent` i `agents` stanje
+        setSelectedAgent((prevAgent) => {
+          if (prevAgent) {
+            const updatedChatHistory = [
+              ...(prevAgent.chatHistory || []),
+              userMessage,
+              botMessage,
+            ];
+            return { ...prevAgent, chatHistory: updatedChatHistory };
+          }
+          return prevAgent;
+        });
+  
         setAgents((prevAgents) =>
           prevAgents.map((agent) =>
-            agent.id === updatedAgentWithBot.id ? updatedAgentWithBot : agent
+            agent.id === selectedAgent.id
+              ? {
+                  ...agent,
+                  chatHistory: [
+                    ...(agent.chatHistory || []),
+                    userMessage,
+                    botMessage,
+                  ],
+                }
+              : agent
           )
         );
       } catch (error) {
@@ -259,12 +267,21 @@ function App() {
         });
         formData.append('name', agentName);
         formData.append('prompt', agentPrompt);
-
+  
         const response = await axios.put(
           `/api/agents/${editAgent.id}`,
           formData
         );
-        const updatedAgent = response.data;
+        let updatedAgent = response.data;
+  
+        // Inicijalizirajte prazna polja ako nisu prisutna
+        if (!updatedAgent.files) {
+          updatedAgent.files = [];
+        }
+        if (!updatedAgent.chatHistory) {
+          updatedAgent.chatHistory = [];
+        }
+  
         setAgents((prevAgents) =>
           prevAgents.map((agent) =>
             agent.id === updatedAgent.id ? updatedAgent : agent
