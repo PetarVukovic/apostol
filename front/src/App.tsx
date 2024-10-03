@@ -1,4 +1,5 @@
 // src/App.tsx
+
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ChakraProvider,
@@ -18,6 +19,10 @@ import {
   Avatar,
   IconButton,
   Collapse,
+  Spinner,
+  Flex,
+  Box,
+  Center,
 } from '@chakra-ui/react';
 import {
   FiUser,
@@ -26,9 +31,16 @@ import {
   FiChevronLeft,
   FiChevronRight,
   FiChevronDown,
+  FiChevronUp,
+  FiTrash,
+  FiEdit,
 } from 'react-icons/fi';
 import { FaRobot } from 'react-icons/fa';
 import axios from 'axios';
+import PDFViewer from './components/PDFViewer';
+
+import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
+import 'react-pdf/dist/esm/Page/TextLayer.css';
 
 interface Agent {
   id: number;
@@ -50,6 +62,11 @@ interface Message {
 
 function App() {
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const {
+    isOpen: isEditOpen,
+    onOpen: onEditOpen,
+    onClose: onEditClose,
+  } = useDisclosure();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [agentName, setAgentName] = useState('');
@@ -60,9 +77,18 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showPDFList, setShowPDFList] = useState<{ [key: number]: boolean }>({});
+  const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null);
+  const [editAgent, setEditAgent] = useState<Agent | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  axios.defaults.baseURL = 'http://localhost:8000';
+  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+  const [isUpdatingAgent, setIsUpdatingAgent] = useState(false);
+  const [isDeletingAgent, setIsDeletingAgent] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isAgentsExpanded, setIsAgentsExpanded] = useState(true);
 
+  axios.defaults.baseURL = 'http://localhost:8000';
 
   // Auto-scroll to the bottom when new messages are added
   useEffect(() => {
@@ -80,17 +106,20 @@ function App() {
 
   const fetchAgents = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/agents');
-      console.log('Agents API Response:', response.data);
+      setIsLoadingAgents(true);
+      const response = await axios.get('/api/agents');
       setAgents(response.data);
     } catch (error) {
       console.error('Error fetching agents:', error);
-      setAgents([]); // Ensure agents is always an array
+      setAgents([]);
+    } finally {
+      setIsLoadingAgents(false);
     }
   };
 
   const handleAgentCreate = async () => {
     try {
+      setIsCreatingAgent(true);
       // Upload files to backend
       const formData = new FormData();
       agentFiles.forEach((file) => {
@@ -99,7 +128,7 @@ function App() {
       formData.append('name', agentName);
       formData.append('prompt', agentPrompt);
 
-      const response = await axios.post('http://localhost:8000/api/agents', formData);
+      const response = await axios.post('/api/agents', formData);
       const newAgent = response.data;
       setAgents([...agents, newAgent]);
       setAgentName('');
@@ -108,17 +137,23 @@ function App() {
       onClose();
     } catch (error) {
       console.error('Error creating agent:', error);
+    } finally {
+      setIsCreatingAgent(false);
     }
   };
 
   const handleAgentClick = async (agent: Agent) => {
     setSelectedAgent(agent);
+    setSelectedFile(null);
     // Fetch conversation history from backend
     try {
-      const response = await axios.get(`http://localhost:8000/api/agents/${agent.id}/messages`);
+      setIsLoadingMessages(true);
+      const response = await axios.get(`/api/agents/${agent.id}/messages`);
       setSelectedAgent({ ...agent, chatHistory: response.data });
     } catch (error) {
       console.error('Error fetching conversation history:', error);
+    } finally {
+      setIsLoadingMessages(false);
     }
   };
 
@@ -137,13 +172,18 @@ function App() {
       );
 
       setCurrentMessage('');
+      setIsStreaming(true);
+      setIsSendingMessage(true);
       // Send message to backend and get response
       try {
         const response = await axios.post(
           `/api/agents/${selectedAgent.id}/messages`,
           { text: userMessage.text }
         );
-        const botMessage: Message = { sender: 'bot', text: response.data.text };
+        const botMessage: Message = {
+          sender: 'bot',
+          text: response.data.text,
+        };
         const updatedAgentWithBot = {
           ...updatedAgent,
           chatHistory: [...updatedAgent.chatHistory, botMessage],
@@ -156,6 +196,9 @@ function App() {
         );
       } catch (error) {
         console.error('Error sending message:', error);
+      } finally {
+        setIsStreaming(false);
+        setIsSendingMessage(false);
       }
     }
   };
@@ -179,6 +222,89 @@ function App() {
     }));
   };
 
+  const handlePDFClick = (file: FileInfo) => {
+    setSelectedFile(file);
+  };
+
+  const handleDeleteAgent = async (agent: Agent) => {
+    try {
+      setIsDeletingAgent(true);
+      await axios.delete(`/api/agents/${agent.id}`);
+      setAgents((prevAgents) => prevAgents.filter((a) => a.id !== agent.id));
+      if (selectedAgent?.id === agent.id) {
+        setSelectedAgent(null);
+      }
+    } catch (error) {
+      console.error('Error deleting agent:', error);
+    } finally {
+      setIsDeletingAgent(false);
+    }
+  };
+
+  const handleEditAgent = (agent: Agent) => {
+    setEditAgent(agent);
+    setAgentName(agent.name);
+    setAgentPrompt(agent.prompt);
+    setAgentFiles([]);
+    onEditOpen();
+  };
+
+  const handleAgentUpdate = async () => {
+    if (editAgent) {
+      try {
+        setIsUpdatingAgent(true);
+        const formData = new FormData();
+        agentFiles.forEach((file) => {
+          formData.append('files', file);
+        });
+        formData.append('name', agentName);
+        formData.append('prompt', agentPrompt);
+
+        const response = await axios.put(
+          `/api/agents/${editAgent.id}`,
+          formData
+        );
+        const updatedAgent = response.data;
+        setAgents((prevAgents) =>
+          prevAgents.map((agent) =>
+            agent.id === updatedAgent.id ? updatedAgent : agent
+          )
+        );
+        if (selectedAgent?.id === updatedAgent.id) {
+          setSelectedAgent(updatedAgent);
+        }
+        setEditAgent(null);
+        setAgentName('');
+        setAgentPrompt('');
+        setAgentFiles([]);
+        onEditClose();
+      } catch (error) {
+        console.error('Error updating agent:', error);
+      } finally {
+        setIsUpdatingAgent(false);
+      }
+    }
+  };
+
+  const handleDeleteFile = async (fileId: number) => {
+    try {
+      await axios.delete(`/api/files/${fileId}`);
+      if (editAgent) {
+        const updatedFiles = editAgent.files.filter(
+          (file) => file.id !== fileId
+        );
+        setEditAgent({ ...editAgent, files: updatedFiles });
+      }
+    } catch (error) {
+      console.error('Error deleting file:', error);
+    }
+  };
+
+  // Toggle Agents Expansion in Sidebar
+  const toggleAgentsExpansion = () => {
+    setIsAgentsExpanded(!isAgentsExpanded);
+  };
+
   // Login Handler
   const handleLogin = (username: string, password: string) => {
     // Replace with actual authentication logic
@@ -195,161 +321,260 @@ function App() {
 
   return (
     <ChakraProvider>
-      <div className="flex h-screen bg-gray-100">
+      <Flex h="100vh">
         {/* Sidebar */}
-        <div
-          className={`${
-            isSidebarOpen ? 'w-64' : 'w-20'
-          } flex flex-col h-full p-4 bg-white border border-blue-200 m-4 rounded-md transition-all duration-300`}
+        <Box
+          w={isSidebarOpen ? '250px' : '60px'}
+          transition="width 0.2s"
+          bg="gray.200"
+          overflow="hidden"
+          position="relative"
         >
-          {/* Toggle Sidebar Button */}
-          <div className="flex items-center justify-between mb-4">
-            {isSidebarOpen && (
-              <Text className="text-xl font-bold">Agents</Text>
-            )}
-            <IconButton
-              icon={
-                isSidebarOpen ? <FiChevronLeft /> : <FiChevronRight />
-              }
-              aria-label="Toggle Sidebar"
-              onClick={toggleSidebar}
-              variant="ghost"
-              colorScheme="blue"
-              size="sm"
-            />
-          </div>
           <VStack
             spacing={4}
             align="stretch"
-            className="flex-1 overflow-auto"
-            divider={<div className="border-t border-blue-200"></div>}
+            h="100%"
+            overflowY="auto"
+            p={2}
           >
-            <IconButton
-              icon={<FiPlus />}
-              aria-label="Add new agent"
-              colorScheme="blue"
-              onClick={onOpen}
-              size="md"
-              className="border border-blue-200"
-            />
-            {agents.map((agent) => (
-              <div key={agent.id} className="relative">
-                {isSidebarOpen ? (
-                  <div className="flex flex-col">
-                    <Button
-                      variant="ghost"
-                      onClick={() => handleAgentClick(agent)}
-                      size="md"
-                      justifyContent="flex-start"
-                      leftIcon={
-                        <Avatar icon={<FaRobot />} size="xs" />
-                      }
-                      className="border border-blue-200"
-                      rightIcon={
-                        <IconButton
-                          icon={<FiChevronDown />}
-                          aria-label="Show PDFs"
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            togglePDFList(agent.id);
-                          }}
-                        />
-                      }
-                    >
-                      {agent.name}
-                    </Button>
+            {/* Sidebar Header */}
+            <Flex align="center" justify="space-between">
+              {isSidebarOpen && (
+                <Button
+                  variant="ghost"
+                  leftIcon={<FiUser />}
+                  rightIcon={
+                    isAgentsExpanded ? <FiChevronUp /> : <FiChevronDown />
+                  }
+                  onClick={toggleAgentsExpansion}
+                  justifyContent="space-between"
+                  flex="1"
+                >
+                  Agents
+                </Button>
+              )}
+              <IconButton
+                icon={isSidebarOpen ? <FiChevronLeft /> : <FiChevronRight />}
+                aria-label="Toggle Sidebar"
+                onClick={toggleSidebar}
+                variant="ghost"
+                size="sm"
+              />
+            </Flex>
+
+            {/* Add Agent Button */}
+            {isSidebarOpen && (
+              <Button
+                leftIcon={<FiPlus />}
+                variant="ghost"
+                colorScheme="blue"
+                onClick={onOpen}
+                justifyContent="flex-start"
+              >
+                Add Agent
+              </Button>
+            )}
+
+            {/* Agents List */}
+            <Collapse in={isAgentsExpanded}>
+              {isLoadingAgents ? (
+                <Center>
+                  <Spinner size="sm" />
+                </Center>
+              ) : (
+                agents.map((agent) => (
+                  <Box key={agent.id} pl={4} pr={2}>
+                    <Flex align="center">
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleAgentClick(agent)}
+                        size="sm"
+                        flex="1"
+                        justifyContent="flex-start"
+                        leftIcon={<FaRobot />}
+                      >
+                        {agent.name}
+                      </Button>
+                      <IconButton
+                        icon={
+                          showPDFList[agent.id] ? (
+                            <FiChevronUp />
+                          ) : (
+                            <FiChevronDown />
+                          )
+                        }
+                        aria-label="Show PDFs"
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePDFList(agent.id);
+                        }}
+                      />
+                      <IconButton
+                        icon={<FiEdit />}
+                        aria-label="Edit Agent"
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditAgent(agent);
+                        }}
+                      />
+                      <IconButton
+                        icon={<FiTrash />}
+                        aria-label="Delete Agent"
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteAgent(agent);
+                        }}
+                        isLoading={isDeletingAgent}
+                      />
+                    </Flex>
                     <Collapse in={showPDFList[agent.id]}>
                       <VStack
                         align="start"
-                        spacing={2}
-                        className="pl-8 mt-2"
+                        spacing={1}
+                        pl={6}
+                        mt={1}
                       >
                         {agent.files.map((file) => (
-                          <Text key={file.id} fontSize="sm">
+                          <Button
+                            key={file.id}
+                            variant="ghost"
+                            size="sm"
+                            justifyContent="flex-start"
+                            onClick={() => handlePDFClick(file)}
+                          >
                             {file.name}
-                          </Text>
+                          </Button>
                         ))}
                       </VStack>
                     </Collapse>
-                  </div>
-                ) : (
-                  <IconButton
-                    icon={<Avatar icon={<FaRobot />} size="sm" />}
-                    aria-label={agent.name}
-                    onClick={() => handleAgentClick(agent)}
-                    size="md"
-                    variant="ghost"
-                    colorScheme="gray"
-                    className="border border-blue-200"
-                  />
-                )}
-              </div>
-            ))}
+                  </Box>
+                ))
+              )}
+            </Collapse>
+
+            {/* Settings Button */}
             <IconButton
               icon={<FiSettings />}
               aria-label="Settings"
               colorScheme="gray"
               size="md"
-              className="border border-blue-200 mt-auto"
+              mt="auto"
+              mb={2}
             />
           </VStack>
-        </div>
+        </Box>
 
-        {/* Main Chat Area */}
-        <div className="flex flex-col flex-1 h-full p-4 m-4 bg-white border border-blue-200 rounded-md">
-          {selectedAgent ? (
-            <>
-              <div className="flex items-center mb-4">
-                <Avatar
-                  icon={<FaRobot />}
-                  size="md"
-                  className="bg-teal-500 mr-2"
-                />
+        {/* Main Content Area */}
+        <Flex flex="1" direction="column" h="100%">
+          {selectedFile ? (
+            <Box
+              flex="1"
+              overflowY="auto"
+              p={4}
+              m={4}
+              bg="white"
+              border="1px"
+              borderColor="blue.200"
+              borderRadius="md"
+            >
+              <PDFViewer
+                fileId={selectedFile.id}
+                fileName={selectedFile.name}
+              />
+            </Box>
+          ) : selectedAgent ? (
+            <Flex
+              flex="1"
+              direction="column"
+              overflowY="auto"
+              p={4}
+              m={4}
+              bg="white"
+              border="1px"
+              borderColor="blue.200"
+              borderRadius="md"
+            >
+              {/* Chat Header */}
+              <Flex align="center" mb={4}>
+                <Avatar icon={<FaRobot />} size="md" mr={2} />
                 <Text fontSize="2xl">Chat with {selectedAgent.name}</Text>
-              </div>
-              <div className="flex flex-col flex-1 overflow-auto p-4 bg-gray-100 rounded-md">
-                {selectedAgent.chatHistory?.map((message, index) => (
-                  <div
-                    key={index}
-                    className={`flex mb-2 ${
-                      message.sender === 'user'
-                        ? 'justify-end'
-                        : 'justify-start'
-                    }`}
-                  >
-                    <div
-                      className={`${
-                        message.sender === 'user'
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-white text-black border border-gray-200'
-                      } p-3 rounded-md max-w-md`}
+              </Flex>
+
+              {/* Chat Messages */}
+              <VStack spacing={4} align="stretch" flex="1" overflowY="auto">
+                {isLoadingMessages ? (
+                  <Center>
+                    <Spinner size="xl" />
+                  </Center>
+                ) : (
+                  selectedAgent.chatHistory?.map((message, index) => (
+                    <Flex
+                      key={index}
+                      justify={
+                        message.sender === 'user' ? 'flex-end' : 'flex-start'
+                      }
                     >
-                      <Text>{message.text}</Text>
-                    </div>
-                  </div>
-                ))}
+                      <Box
+                        bg={
+                          message.sender === 'user' ? 'blue.500' : 'gray.100'
+                        }
+                        color={
+                          message.sender === 'user' ? 'white' : 'black'
+                        }
+                        p={3}
+                        borderRadius="md"
+                        maxW="70%"
+                      >
+                        <Text>{message.text}</Text>
+                      </Box>
+                    </Flex>
+                  ))
+                )}
+                {isStreaming && (
+                  <Flex justify="flex-start">
+                    <Box
+                      bg="gray.100"
+                      color="black"
+                      p={3}
+                      borderRadius="md"
+                      maxW="70%"
+                    >
+                      <Spinner size="sm" />
+                    </Box>
+                  </Flex>
+                )}
                 <div ref={messagesEndRef} />
-              </div>
-              <div className="mt-4">
-                <HStack>
-                  <Input
-                    placeholder="Type your message..."
-                    value={currentMessage}
-                    onChange={(e) => setCurrentMessage(e.target.value)}
-                  />
-                  <Button colorScheme="blue" onClick={handleSendMessage}>
-                    Send
-                  </Button>
-                </HStack>
-              </div>
-            </>
+              </VStack>
+
+              {/* Message Input */}
+              <HStack mt={4}>
+                <Input
+                  placeholder="Type your message..."
+                  value={currentMessage}
+                  onChange={(e) => setCurrentMessage(e.target.value)}
+                />
+                <Button
+                  colorScheme="blue"
+                  onClick={handleSendMessage}
+                  isLoading={isSendingMessage}
+                >
+                  Send
+                </Button>
+              </HStack>
+            </Flex>
           ) : (
-            <Text>Select an agent to start chatting!</Text>
+            <Center flex="1">
+              <Text>Select an agent to start chatting or view a PDF!</Text>
+            </Center>
           )}
-        </div>
-      </div>
+        </Flex>
+      </Flex>
 
       {/* Modal for creating a new agent */}
       <Modal isOpen={isOpen} onClose={onClose}>
@@ -372,10 +597,65 @@ function App() {
             </VStack>
           </ModalBody>
           <ModalFooter>
-            <Button colorScheme="blue" mr={3} onClick={handleAgentCreate}>
+            <Button
+              colorScheme="blue"
+              mr={3}
+              onClick={handleAgentCreate}
+              isLoading={isCreatingAgent}
+            >
               Create
             </Button>
             <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* Modal for editing an agent */}
+      <Modal isOpen={isEditOpen} onClose={onEditClose}>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Edit Agent</ModalHeader>
+          <ModalBody>
+            <VStack spacing={4}>
+              <Input
+                placeholder="Agent Name"
+                value={agentName}
+                onChange={(e) => setAgentName(e.target.value)}
+              />
+              <Textarea
+                placeholder="Enter prompt for agent..."
+                value={agentPrompt}
+                onChange={(e) => setAgentPrompt(e.target.value)}
+              />
+              <Input type="file" multiple onChange={handleFileUpload} />
+              <Text>Existing Files:</Text>
+              <VStack spacing={2} align="stretch">
+                {editAgent?.files.map((file) => (
+                  <HStack key={file.id} spacing={2}>
+                    <Text>{file.name}</Text>
+                    <IconButton
+                      icon={<FiTrash />}
+                      aria-label="Delete File"
+                      size="sm"
+                      onClick={() => handleDeleteFile(file.id)}
+                    />
+                  </HStack>
+                ))}
+              </VStack>
+            </VStack>
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              colorScheme="blue"
+              mr={3}
+              onClick={handleAgentUpdate}
+              isLoading={isUpdatingAgent}
+            >
+              Save
+            </Button>
+            <Button variant="ghost" onClick={onEditClose}>
               Cancel
             </Button>
           </ModalFooter>
@@ -395,8 +675,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   return (
     <ChakraProvider>
-      <div className="flex items-center justify-center h-screen bg-gray-100">
-        <div className="p-8 bg-white border border-blue-200 rounded-md">
+      <Flex align="center" justify="center" h="100vh" bg="gray.100">
+        <Box p={8} bg="white" border="1px" borderColor="blue.200" borderRadius="md">
           <Text fontSize="2xl" mb={4}>
             Login
           </Text>
@@ -419,8 +699,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               Login
             </Button>
           </VStack>
-        </div>
-      </div>
+        </Box>
+      </Flex>
     </ChakraProvider>
   );
 };

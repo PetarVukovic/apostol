@@ -15,6 +15,7 @@ class File(Base):
     __tablename__ = 'files'
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
+    path = Column(String)  # Add this line
     agent_id = Column(Integer, ForeignKey('agents.id'))
     agent = relationship("Agent", back_populates="files")
 

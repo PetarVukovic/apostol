@@ -5,6 +5,7 @@ from typing import List
 class File(BaseModel):
     id: int
     name: str
+    path:str
 
     class Config:
         orm_mode = True
