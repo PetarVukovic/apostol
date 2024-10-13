@@ -10,10 +10,12 @@ export interface FileInfo {
     text: string;
   }
   
-  export interface Agent {
-    id: number;
-    name: string;
-    prompt: string;
-    files: FileInfo[];
-    chatHistory: Message[];
-  }
+// types/Agent.ts
+
+export interface Agent {
+  id: number; // Ensure this matches the backend's agent_id
+  name: string;
+  prompt: string;
+  chatHistory: Message[];
+  files?: File[];
+}

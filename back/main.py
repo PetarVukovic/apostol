@@ -1,16 +1,28 @@
-from fastapi import FastAPI, Depends,HTTPException
+# main.py
+
+from typing import Optional
+from fastapi import FastAPI, Depends, Form, HTTPException, UploadFile, File, status
 from fastapi.middleware.cors import CORSMiddleware
 from dependencies import get_db
 from supabase import Client
+from schemas.agents import AgentOut
 from schemas.users import UserLogin, UserOut, UserRegister
+from auth import compare_passwords, get_current_userId, oauth2_scheme, SECRET_KEY, ALGORITHM
 import bcrypt
 from jose import jwt
-from auth import compare_passwords
+import unicodedata
+import re
 
-
+def sanitize_filename(filename):
+    # Uklanja ili normalizira specijalne znakove iz naziva datoteke
+    filename = unicodedata.normalize('NFKD', filename).encode('ascii', 'ignore').decode('ascii')
+    # Zamijeni nedozvoljene znakove poput razmaka s donjom crtom
+    filename = re.sub(r'[^\w\s-]', '', filename).strip().lower()
+    filename = re.sub(r'[-\s]+', '_', filename)
+    return filename
 app = FastAPI()
 
-# Postavljanje CORS-a
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,40 +31,71 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.post("/register", response_model=UserOut)
 async def create_user(user: UserRegister, supabase: Client = Depends(get_db)):
-    hashed_password=bcrypt.hashpw(user.password_hash.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    hashed_password = bcrypt.hashpw(user.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     try:
         new_user = supabase.table('users').insert({
             'name': user.name,
             'email': user.email,
             'password_hash': hashed_password
         }).execute()
+        return new_user.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    except HTTPException as e:
-        return e.status_code
-    
 @app.post("/login")
 async def login(user: UserLogin, supabase: Client = Depends(get_db)):
     try:
-        users=supabase.table('users').select('*').eq('email',user.email).execute()
+        users = supabase.table('users').select('*').eq('email', user.email).execute()
         if users.data:
             if compare_passwords(user.password, users.data[0]['password_hash']):
-                access_token = jwt.encode({'user_id': users.data[0]['user_id']}, 'secret', algorithm='HS256')
+                access_token = jwt.encode({'user_id': users.data[0]['user_id']}, SECRET_KEY, algorithm=ALGORITHM)
                 return {'access_token': access_token}
-    except HTTPException as e:
-        return e.status_code
+            else:
+                raise HTTPException(status_code=400, detail="Incorrect username or password")
+        else:
+            raise HTTPException(status_code=400, detail="User not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/get-users",response_model=list[UserOut])
-async def get_users(supabase: Client = Depends(get_db)):
+@app.post('/create-agent', response_model=AgentOut)
+async def create_agent(
+    name: str = Form(...),
+    prompt: str = Form(...),
+    file: Optional[UploadFile] = File(None),
+    user_id: str = Depends(get_current_userId),
+    supabase: Client = Depends(get_db)
+):
     try:
-        users = supabase.table('users').select('*').execute()
-        return users.data
-    except HTTPException as e:
-        return e.status_code
+        filename = None
+        if file:
+            # Pročitaj PDF file kao byteove
+            file_data = await file.read()
+            filename = sanitize_filename(file.filename)
 
-
-
-
-
-
+            # Pravilno uploadaj file koristeći bytes
+            upload_response = supabase.storage.from_('cipdfs').upload(filename, file_data)
+            
+            # Provjera ako je došlo do greške prilikom uploada
+            if upload_response.get('error'):
+                raise HTTPException(status_code=400, detail=f"Error uploading file: {upload_response['error']['message']}")
+        
+        # Kreiraj novi unos agenta u bazi podataka
+        new_agent = supabase.table('agents').insert({
+            'name': name,
+            'prompt': prompt,
+            'user_id': user_id,
+            'files': filename,
+            'chatHistory': ''  # Inicijaliziraj chatHistory kao prazan string
+        }).execute()
+        
+        # Dohvati unesene podatke o agentu
+        agent_data = new_agent.data[0]
+        return agent_data
+    
+    except Exception as e:
+        # Ispisuje grešku kako bi lakše dijagnosticirao problem
+        print(f"Greška: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

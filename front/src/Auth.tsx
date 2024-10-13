@@ -28,37 +28,39 @@ const Auth: React.FC<AuthProps> = ({ setIsAuthenticated }) => {
   const [regPassword, setRegPassword] = useState<string>('');
   const toast = useToast();
 
-  const handleLogin = async () => {
-    try {
-      const response = await axiosInstance.post('/login', {
-        email: loginEmail,
-        password: loginPassword,
-      });
+// Auth.tsx
 
-      // Assuming the response contains a token
-      const token = response.data.token;
-      localStorage.setItem('token', token); // Store token in localStorage
+const handleLogin = async () => {
+  try {
+    const response = await axiosInstance.post('/login', {
+      email: loginEmail,
+      password: loginPassword,
+    });
 
-      setIsAuthenticated(true); // Update authentication state
+    // Correctly retrieve the token from the response
+    const token = response.data.access_token;
+    localStorage.setItem('token', token); // Store token in localStorage
 
-      toast({
-        title: 'Login successful.',
-        status: 'success',
-        duration: 3000,
-        isClosable: true,
-      });
-      // Redirect or perform additional actions
-    } catch (error: any) {
-      toast({
-        title: 'Login failed.',
-        description:
-          error.response?.data?.detail || 'An error occurred during login.',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      });
-    }
-  };
+    setIsAuthenticated(true); // Update authentication state
+
+    toast({
+      title: 'Login successful.',
+      status: 'success',
+      duration: 3000,
+      isClosable: true,
+    });
+    // Redirect or perform additional actions
+  } catch (error: any) {
+    toast({
+      title: 'Login failed.',
+      description:
+        error.response?.data?.detail || 'An error occurred during login.',
+      status: 'error',
+      duration: 3000,
+      isClosable: true,
+    });
+  }
+};
 
   const handleRegister = async () => {
     try {

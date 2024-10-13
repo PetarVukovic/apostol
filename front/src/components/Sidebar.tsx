@@ -1,27 +1,33 @@
+// Sidebar.tsx
+
 import React, { useState } from 'react';
 import {
   Box,
-  Button,
   VStack,
+  Button,
   IconButton,
   Flex,
   Collapse,
-  Center,
   Text as ChakraText,
   useDisclosure,
   Tooltip,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  Avatar,
 } from '@chakra-ui/react';
+import { FaRobot } from 'react-icons/fa';
 import {
-  FiPlus,
   FiChevronLeft,
   FiChevronRight,
-  FiChevronDown,
-  FiChevronUp,
-  FiTrash,
-  FiEdit,
+  FiPlus,
   FiLogOut,
+  FiEdit,
+  FiTrash,
+  FiUpload,
+  FiMenu,
 } from 'react-icons/fi';
-import { FaRobot, FaCog } from 'react-icons/fa';
 import { Agent } from '../types/Agent';
 
 interface SidebarProps {
@@ -29,8 +35,9 @@ interface SidebarProps {
   onAgentClick: (agent: Agent) => void;
   onCreateAgent: () => void;
   onEditAgent: (agent: Agent) => void;
-  onDeleteAgent: (agentId: number) => void;
+  onDeleteAgent: (agent: Agent) => void;
   onLogout: () => void;
+  onUploadFile: (agent: Agent, files: FileList | null) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -40,148 +47,150 @@ const Sidebar: React.FC<SidebarProps> = ({
   onEditAgent,
   onDeleteAgent,
   onLogout,
+  onUploadFile,
 }) => {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isAgentsExpanded, setIsAgentsExpanded] = useState(true);
-  const [showPDFList, setShowPDFList] = useState<{ [key: number]: boolean }>({});
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const toggleSidebar = () => {
-    setIsSidebarOpen(!isSidebarOpen);
-  };
-
-  const toggleAgentsExpansion = () => {
-    setIsAgentsExpanded(!isAgentsExpanded);
+    setIsSidebarCollapsed(!isSidebarCollapsed);
   };
 
   return (
     <Box
-      w={isSidebarOpen ? '250px' : '80px'}
-      transition="width 0.2s"
+      w={isSidebarCollapsed ? '80px' : '250px'}
       bg="gray.200"
-      overflow="hidden"
-      position="relative"
-      borderRadius="lg"
-      m={4}
-      boxShadow="md"
+      p={2}
+      borderRight="1px solid"
+      borderColor="gray.300"
+      h="100vh"
+      transition="width 0.2s"
     >
-      <VStack spacing={4} align="stretch" h="calc(100vh - 2rem)" overflowY="auto" p={2}>
+      <VStack spacing={4} align="stretch">
+        {/* Header with Toggle Button */}
         <Flex align="center" justify="space-between">
-          <Button
-            variant="ghost"
-            leftIcon={<FaRobot />}
-            rightIcon={
-              isSidebarOpen ? (
-                isAgentsExpanded ? (
-                  <FiChevronUp />
-                ) : (
-                  <FiChevronDown />
-                )
-              ) : undefined
-            }
-            onClick={toggleAgentsExpansion}
-            justifyContent="flex-start"
-            flex="1"
-            pl={isSidebarOpen ? 2 : 0}
-          >
-            {isSidebarOpen ? 'Agents' : null}
-          </Button>
+          {!isSidebarCollapsed && (
+            <ChakraText fontSize="lg" fontWeight="bold">
+              Agents
+            </ChakraText>
+          )}
           <IconButton
-            icon={isSidebarOpen ? <FiChevronLeft /> : <FiChevronRight />}
+            icon={isSidebarCollapsed ? <FiChevronRight /> : <FiChevronLeft />}
             aria-label="Toggle Sidebar"
-            onClick={toggleSidebar}
             variant="ghost"
+            onClick={toggleSidebar}
             size="sm"
           />
         </Flex>
 
-        <Button
-          leftIcon={<FiPlus />}
-          variant="ghost"
-          colorScheme="blue"
-          onClick={onCreateAgent}
-          justifyContent="flex-start"
-          pl={isSidebarOpen ? 2 : 0}
-        >
-          {isSidebarOpen ? 'Add Agent' : null}
-        </Button>
+        {/* Create New Agent Button */}
+        <Tooltip label="Create New Agent" placement="right">
+          <Button
+            leftIcon={<FiPlus />}
+            colorScheme="blue"
+            onClick={onCreateAgent}
+            variant="solid"
+            size="sm"
+            w="100%"
+            justifyContent={isSidebarCollapsed ? 'center' : 'flex-start'}
+          >
+            {!isSidebarCollapsed && 'Create New Agent'}
+          </Button>
+        </Tooltip>
 
-        <Collapse in={isAgentsExpanded || !isSidebarOpen} animateOpacity>
+        {/* Agent List */}
+        <Collapse in={!isSidebarCollapsed} animateOpacity>
           {agents.length === 0 ? (
-            isSidebarOpen && (
-              <Center>
-                <ChakraText>No agents available.</ChakraText>
-              </Center>
-            )
+            <ChakraText>No agents available.</ChakraText>
           ) : (
             agents.map((agent) => (
-              <Box key={agent.id} pl={isSidebarOpen ? 4 : 0} pr={2}>
-                <Flex align="center">
-                  <Tooltip label={agent.name} isDisabled={isSidebarOpen} placement="right">
-                    <Button
-                      variant="ghost"
-                      onClick={() => onAgentClick(agent)}
-                      size="sm"
-                      flex="1"
-                      justifyContent={isSidebarOpen ? 'flex-start' : 'center'}
-                      leftIcon={isSidebarOpen ? <FaRobot /> : undefined}
-                      icon={!isSidebarOpen ? <FaRobot /> : undefined}
-                      pl={isSidebarOpen ? 2 : 0}
+              <Flex
+                key={agent.id}
+                align="center"
+                justify="space-between"
+                w="100%"
+                py={1}
+              >
+                <Button
+                  variant="ghost"
+                  onClick={() => onAgentClick(agent)}
+                  leftIcon={<Avatar size="xs" icon={<FaRobot />} />}
+                  size="sm"
+                  flex="1"
+                  justifyContent="flex-start"
+                >
+                  {agent.name}
+                </Button>
+                <Menu>
+                  <MenuButton
+                    as={IconButton}
+                    icon={<FiMenu />}
+                    size="sm"
+                    variant="ghost"
+                  />
+                  <MenuList>
+                    <MenuItem
+                      icon={<FiEdit />}
+                      onClick={() => onEditAgent(agent)}
                     >
-                      {isSidebarOpen ? agent.name : null}
-                    </Button>
-                  </Tooltip>
-                  {isSidebarOpen && (
-                    <>
-                      <IconButton
-                        icon={showPDFList[agent.id] ? <FiChevronUp /> : <FiChevronDown />}
-                        aria-label="Show PDFs"
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowPDFList((prev) => ({
-                            ...prev,
-                            [agent.id]: !prev[agent.id],
-                          }));
-                        }}
-                      />
-                      <IconButton
-                        icon={<FiEdit />}
-                        aria-label="Edit Agent"
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditAgent(agent);
-                        }}
-                      />
-                      <IconButton
-                        icon={<FiTrash />}
-                        aria-label="Delete Agent"
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteAgent(agent.id);
-                        }}
-                      />
-                    </>
-                  )}
-                </Flex>
-              </Box>
+                      Edit
+                    </MenuItem>
+                    <MenuItem
+                      icon={<FiTrash />}
+                      onClick={() => onDeleteAgent(agent)}
+                    >
+                      Delete
+                    </MenuItem>
+                    <MenuItem
+                      icon={<FiUpload />}
+                      onClick={() => {
+                        const fileInput = document.createElement('input');
+                        fileInput.type = 'file';
+                        fileInput.multiple = true;
+                        fileInput.onchange = () =>
+                          onUploadFile(agent, fileInput.files);
+                        fileInput.click();
+                      }}
+                    >
+                      Upload Files
+                    </MenuItem>
+                  </MenuList>
+                </Menu>
+              </Flex>
             ))
           )}
         </Collapse>
 
-        <IconButton
-          icon={<FiLogOut />}
-          aria-label="Logout"
-          colorScheme="red"
-          size="md"
-          mt="auto"
-          onClick={onLogout}
-          alignSelf={isSidebarOpen ? 'flex-start' : 'center'}
-        />
+        {/* Collapsed Agent Icons */}
+        {isSidebarCollapsed &&
+          agents.map((agent) => (
+            <Tooltip label={agent.name} key={agent.id} placement="right">
+              <IconButton
+                icon={<Avatar size="sm" icon={<FaRobot />} />}
+                aria-label={agent.name}
+                variant="ghost"
+                size="sm"
+                onClick={() => onAgentClick(agent)}
+              />
+            </Tooltip>
+          ))}
+
+        {/* Spacer */}
+        <Box flex="1" />
+
+        {/* Logout Button */}
+        <Tooltip label="Logout" placement="right">
+          <Button
+            leftIcon={<FiLogOut />}
+            colorScheme="red"
+            variant="solid"
+            onClick={onLogout}
+            size="sm"
+            w="100%"
+            justifyContent={isSidebarCollapsed ? 'center' : 'flex-start'}
+          >
+            {!isSidebarCollapsed && 'Logout'}
+          </Button>
+        </Tooltip>
       </VStack>
     </Box>
   );
