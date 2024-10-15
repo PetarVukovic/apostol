@@ -7,7 +7,7 @@ class userBase(BaseModel):
     email: EmailStr  # Bolje koristiti EmailStr za validaciju emaila
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserRegister(userBase):
     password: str

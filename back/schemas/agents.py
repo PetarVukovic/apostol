@@ -15,3 +15,6 @@ class AgentCreate(BaseModel):
 
 class AgentOut(AgentBase):
     user_id: int
+
+    class Config:
+        from_attributes = True

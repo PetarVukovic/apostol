@@ -10,16 +10,8 @@ from schemas.users import UserLogin, UserOut, UserRegister
 from auth import compare_passwords, get_current_userId, oauth2_scheme, SECRET_KEY, ALGORITHM
 import bcrypt
 from jose import jwt
-import unicodedata
-import re
+import os
 
-def sanitize_filename(filename):
-    # Uklanja ili normalizira specijalne znakove iz naziva datoteke
-    filename = unicodedata.normalize('NFKD', filename).encode('ascii', 'ignore').decode('ascii')
-    # Zamijeni nedozvoljene znakove poput razmaka s donjom crtom
-    filename = re.sub(r'[^\w\s-]', '', filename).strip().lower()
-    filename = re.sub(r'[-\s]+', '_', filename)
-    return filename
 app = FastAPI()
 
 # CORS Middleware
@@ -41,7 +33,7 @@ async def create_user(user: UserRegister, supabase: Client = Depends(get_db)):
             'email': user.email,
             'password_hash': hashed_password
         }).execute()
-        return new_user.data[0]
+        return UserOut.model_validate(new_user.data[0])
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -71,29 +63,37 @@ async def create_agent(
     try:
         filename = None
         if file:
-            # Pročitaj PDF file kao byteove
-            file_data = await file.read()
-            filename = sanitize_filename(file.filename)
+            # Kreiraj direktorij ako ne postoji
+            save_dir = os.path.join(os.path.dirname(__file__), 'files')
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Definiraj putanju za spremanje datoteke
+            file_path = os.path.join(save_dir, file.filename)
+
+            # Spremi PDF datoteku
+            with open(file_path, 'wb') as f:
+                content = await file.read()  # Pročitaj datoteku kao byteove
+                f.write(content)  # Zapiši sadržaj u novu datoteku
 
             # Pravilno uploadaj file koristeći bytes
-            upload_response = supabase.storage.from_('cipdfs').upload(filename, file_data)
+            #upload_response = supabase.storage.from_('cipdfs').upload(filename, file_data)
             
             # Provjera ako je došlo do greške prilikom uploada
-            if upload_response.get('error'):
-                raise HTTPException(status_code=400, detail=f"Error uploading file: {upload_response['error']['message']}")
+            # if upload_response.get('error'):
+            #     raise HTTPException(status_code=400, detail=f"Error uploading file: {upload_response['error']['message']}")
         
         # Kreiraj novi unos agenta u bazi podataka
         new_agent = supabase.table('agents').insert({
             'name': name,
             'prompt': prompt,
             'user_id': user_id,
-            'files': filename,
+            'files': file.filename,
             'chatHistory': ''  # Inicijaliziraj chatHistory kao prazan string
         }).execute()
         
         # Dohvati unesene podatke o agentu
         agent_data = new_agent.data[0]
-        return agent_data
+        return AgentOut.model_validate(agent_data)
     
     except Exception as e:
         # Ispisuje grešku kako bi lakše dijagnosticirao problem
