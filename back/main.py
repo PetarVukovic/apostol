@@ -66,7 +66,6 @@ async def create_agent(
             # Kreiraj direktorij ako ne postoji
             save_dir = os.path.join(os.path.dirname(__file__), 'files')
             os.makedirs(save_dir, exist_ok=True)
-
             # Definiraj putanju za spremanje datoteke
             file_path = os.path.join(save_dir, file.filename)
 
@@ -75,13 +74,6 @@ async def create_agent(
                 content = await file.read()  # Pročitaj datoteku kao byteove
                 f.write(content)  # Zapiši sadržaj u novu datoteku
 
-            # Pravilno uploadaj file koristeći bytes
-            #upload_response = supabase.storage.from_('cipdfs').upload(filename, file_data)
-            
-            # Provjera ako je došlo do greške prilikom uploada
-            # if upload_response.get('error'):
-            #     raise HTTPException(status_code=400, detail=f"Error uploading file: {upload_response['error']['message']}")
-        
         # Kreiraj novi unos agenta u bazi podataka
         new_agent = supabase.table('agents').insert({
             'name': name,
@@ -98,4 +90,12 @@ async def create_agent(
     except Exception as e:
         # Ispisuje grešku kako bi lakše dijagnosticirao problem
         print(f"Greška: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get('/get-agents', response_model=list[AgentOut])
+async def get_agents(user_id: str = Depends(get_current_userId), supabase: Client = Depends(get_db)):
+    try:
+        agents = supabase.table('agents').select('*').eq('user_id', user_id).execute()
+        return [AgentOut.model_validate(agent) for agent in agents.data]
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

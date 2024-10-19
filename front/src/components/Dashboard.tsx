@@ -1,6 +1,6 @@
 // Dashboard.tsx
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Flex,
   Box,
@@ -48,7 +48,11 @@ const Dashboard: React.FC<DashboardProps> = ({ setIsAuthenticated }) => {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const handleAgentClick = (agent: Agent) => {
-    setSelectedAgent(agent);
+    if (selectedAgent?.id === agent.id) {
+      setSelectedAgent({ ...agent, chatHistory: [] });
+    } else {
+      setSelectedAgent(null);
+    }
   };
 
   const handleCreateAgent = () => {
@@ -106,6 +110,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setIsAuthenticated }) => {
           chatHistory: [],
           files: response.data.files ? [response.data.files] : [],
         };
+        console.log('Agenti za usera', response.data)
 
         setAgents([...agents, newAgent]);
         setAgentName('');
@@ -173,7 +178,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setIsAuthenticated }) => {
     const interval = setInterval(() => {
       if (index <= responseText.length) {
         const streamingMessage: Message = {
-          sender: 'agent',
+          sender: 'bot',
           text: responseText.slice(0, index),
         };
         const updatedAgent = {
@@ -196,6 +201,15 @@ const Dashboard: React.FC<DashboardProps> = ({ setIsAuthenticated }) => {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  useEffect(()=>{
+    scrollToBottom()
+    const agentsResponse=axiosInstance.get('/get-agents')
+    agentsResponse.then((response)=>{
+      setAgents(response.data)
+    })
+
+  },[])
 
   return (
     <Flex h="100vh">
